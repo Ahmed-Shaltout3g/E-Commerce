@@ -71,6 +71,13 @@ export const confirmEmail = async (req, res, next) => {
   const { token } = req.params;
   const decode = decodeToken({ payload: token });
   if (decode) {
+    const confirmTwice = await userModel.find({
+      email: decode.email,
+      isConfirmed: true,
+    });
+    if (confirmTwice) {
+      return next(new Error("already confirmed", { cause: 400 }));
+    }
     const decryptPass = decryptText(
       decode?.password,
       process.env.CRYPTO_SECRET_KEY
