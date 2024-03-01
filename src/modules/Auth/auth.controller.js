@@ -71,7 +71,7 @@ export const confirmEmail = async (req, res, next) => {
   const { token } = req.params;
   const decode = decodeToken({ payload: token });
   if (decode) {
-    const confirmTwice = await userModel.find({
+    const confirmTwice = await userModel.findOne({
       email: decode.email,
       isConfirmed: true,
     });
