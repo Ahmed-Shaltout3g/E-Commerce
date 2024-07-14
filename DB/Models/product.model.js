@@ -90,8 +90,19 @@ const productSchema = new Schema(
         ref: "Uesr",
       },
     ],
+
+    // =================review===================
+    rate: {
+      type: Number,
+      default: 0,
+    },
   },
-  { timestamps: true }
+  { timestamps: true, toJSON: { virtuals: true }, toObject: { virtuals: true } }
 );
 
+productSchema.virtual("Reviews", {
+  ref: "Review",
+  localField: "_id",
+  foreignField: "productId",
+});
 export const productModel = model.Product || model("Product", productSchema);

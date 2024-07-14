@@ -17,6 +17,7 @@ export const initatApp = (express, app) => {
   app.use("/auth", allRoutes.authRoutes);
   app.use("/cart", allRoutes.cartRoutes);
   app.use("/order", allRoutes.orderRoutes);
+  app.use("/review", allRoutes.reviewRoutes);
 
   app.get("/", (req, res) => {
     res.send("hello from simple server :)");

@@ -6,6 +6,10 @@ import { couponFunctionValidation } from "../../utils/coupon.validation.js";
 import { cartModel } from "./../../../DB/Models/cart.model.js";
 import createInvoice from "../../utils/pdfkit.js";
 import { sendEmail } from "../../services/sendEmail.js";
+import { QRCodeFunction } from "../../utils/qrCode.js";
+import { paymentFunction } from "../../utils/payment.js";
+import { decodeToken, generateToken } from "../../utils/tokenFunctions.js";
+import Stripe from "stripe";
 
 export const createOrder = async (req, res, next) => {
   const userId = req.user._id;
@@ -118,6 +122,64 @@ export const createOrder = async (req, res, next) => {
   if (!order) {
     return next(new Error("DB fail, please try again", { cause: 500 }));
   }
+  // ============================payment method=====================
+  let orderSession;
+  if (paymentMethod == "card") {
+    // ===============payment method coupon================
+    let coupon;
+    if (req.coupon) {
+      const stripe = new Stripe(process.env.PAYMENT_SECRET_KEY);
+      if (req.coupon.isPrecentage) {
+        coupon = await stripe.coupons.create({
+          percent_off: req.coupon.couponAmount,
+        });
+      }
+      if (req.coupon.isFixedAmount) {
+        coupon = await stripe.coupons.create({
+          amount_off: req.coupon.couponAmount * 100,
+          currency: "EGP",
+        });
+      }
+      req.couponId = coupon.id;
+    }
+    const token = generateToken({
+      payload: { orderId: order._id },
+      signature: process.env.TOKEN_KEY,
+      expiresIn: "1 hour",
+    });
+    orderSession = await paymentFunction({
+      payment_method_types: ["card"],
+      mode: "payment",
+      customer_email: req.user.email,
+      metadata: { orderId: order._id.toString() },
+      success_url: `${req.protocol}://${req.headers.host}/order/successPaymrnt?token=${token}`,
+      cancel_url: `${req.protocol}://${req.headers.host}/order/cancelPayment?token=${token}`,
+      discounts: req.couponId ? [{ coupon: req.couponId }] : [],
+      line_items: order.products.map((ele) => {
+        return {
+          price_data: {
+            currency: "EGP",
+
+            product_data: {
+              name: ele.title,
+            },
+            unit_amount: ele.price * 100, //calc different
+          },
+          quantity: ele.quantity,
+        };
+      }),
+    });
+  }
+
+  // ===================create QR code===================
+  const orderQR = await QRCodeFunction({
+    data: {
+      orderId: order._id,
+      products: order.products,
+      paid_Amount: order.paidAmount,
+    },
+  });
+
   //======================== create invoice pdf==================================
   const orderCode = `${req.user.userName}_${nanoid(3)}`;
   const orderInvoice = {
@@ -187,7 +249,9 @@ export const createOrder = async (req, res, next) => {
     await userCart.save();
   }
 
-  res.status(201).json({ message: "Done", order });
+  res
+    .status(201)
+    .json({ message: "Done", order, orderQR, checkOutURL: orderSession.url });
 };
 
 // ================= create order from cart===================
@@ -359,7 +423,31 @@ export const fromCartToOrde = async (req, res, next) => {
   res.status(201).json({ message: "Done", orderDB });
 };
 
-// ==================cancel order====================
+// ================================ mark teh order as delivered ===================
+export const deliverOrder = async (req, res, next) => {
+  const { orderId } = req.query;
+
+  const order = await orderModel.findOneAndUpdate(
+    {
+      _id: orderId,
+      orderStatus: { $nin: ["delivered", "pending", "canceled", "rejected"] },
+    },
+    {
+      orderStatus: "delivered",
+    },
+    {
+      new: true,
+    }
+  );
+
+  if (!order) {
+    return next(new Error("invalid order", { cause: 400 }));
+  }
+
+  return res.status(200).json({ message: "Done", order });
+};
+
+// ==================cancel order user do this====================
 
 export const cancelOrder = async (req, res, next) => {
   const { _id } = req.user;
@@ -374,9 +462,9 @@ export const cancelOrder = async (req, res, next) => {
     (!["confirmed", "pending"].includes(order.orderStatus) &&
       order.paymentMethod == "card")
   ) {
-    next(
+    return next(
       new Error(
-        `you canot cancel this order with order status ${order.orderStatus}`,
+        `you can not cancel this order with order status ${order.orderStatus}`,
         { cause: 404 }
       )
     );
@@ -385,10 +473,61 @@ export const cancelOrder = async (req, res, next) => {
   order.reason = reason;
   order.updatedBy = _id;
   const orderCanceled = await order.save();
-  //  decrease coupon Usage
+  //  decrease coupon Usage DONT DO THIS BECAUSE HE CANCEL ORDER
+  // increase products stock by quantity
+  for (const product of order.products) {
+    await productModel.findOneAndUpdate(
+      { _id: product.productId },
+      {
+        $inc: { stock: parseInt(product.quantity) },
+      }
+    );
+  }
+  res.status(200).json({ message: "Done order canceled successfulLy" });
+};
 
-  if (orderCanceled) {
-    console.log(order);
+// ==================success order====================
+export const successPayment = async (req, res, next) => {
+  const { token } = req.query;
+  const decodeData = decodeToken({
+    payload: token,
+  });
+  const order = await orderModel.findOne({
+    _id: decodeData.orderId,
+    orderStatus: "pending",
+  });
+  if (!order) {
+    return new Error("in_valid order id", {
+      cause: 404,
+    });
+  }
+  order.orderStatus = "confirmed";
+  await order.save();
+  res.status(200).json({ message: " order is confirmed", order });
+};
+
+// ==================cancel payment====================
+export const cancelPayment = async (req, res, next) => {
+  const { token } = req.query;
+  const decodeData = decodeToken({
+    payload: token,
+  });
+  const order = await orderModel.findOne({
+    _id: decodeData.orderId,
+  });
+  if (!order) {
+    return new Error("in_valid order id", {
+      cause: 404,
+    });
+  }
+  // ================approch one change status order==========
+  order.orderStatus = "rejected";
+  await order.save();
+  // ================approch two delete order==========
+  // await orderModel.findByIdAndDelete(decodeData.orderId)
+
+  // ============= undo decrease coupon Usage======
+  if (order) {
     if (order.couponId) {
       const coupon = await couponModel.findById(order.couponId);
       if (!coupon) {
@@ -416,30 +555,5 @@ export const cancelOrder = async (req, res, next) => {
       }
     );
   }
-
-  res.status(200).json({ message: "Done order canceled successfulLy" });
-};
-
-// ================================ mark teh order as delivered ===================
-export const deliverOrder = async (req, res, next) => {
-  const { orderId } = req.query;
-
-  const order = await orderModel.findOneAndUpdate(
-    {
-      _id: orderId,
-      orderStatus: { $nin: ["delivered", "pending", "canceled", "rejected"] },
-    },
-    {
-      orderStatus: "delivered",
-    },
-    {
-      new: true,
-    }
-  );
-
-  if (!order) {
-    return next(new Error("invalid order", { cause: 400 }));
-  }
-
-  return res.status(200).json({ message: "Done", order });
+  res.status(200).json({ message: " order is confirmed", order });
 };
