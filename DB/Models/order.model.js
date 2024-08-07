@@ -44,7 +44,7 @@ const orderSchema = new Schema(
         "confirmed",
         "placed",
         "on way",
-        "deliverd",
+        "delivered",
         "canceled",
         "rejected",
       ],

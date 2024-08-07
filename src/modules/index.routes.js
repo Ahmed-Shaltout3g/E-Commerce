@@ -6,6 +6,7 @@ import couponRoutes from "./Coupon/coupon.routes.js";
 import authRoutes from "./Auth/auth.routes.js";
 import cartRoutes from "./Cart/cart.routes.js";
 import orderRoutes from "./Order/order.routes.js";
+import reviewRoutes from "./Review/review.routes.js";
 
 export {
   catagoryRoutes,
@@ -16,4 +17,5 @@ export {
   authRoutes,
   cartRoutes,
   orderRoutes,
+  reviewRoutes,
 };

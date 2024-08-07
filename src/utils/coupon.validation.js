@@ -13,6 +13,7 @@ export const couponFunctionValidation = ({ coupon, userId } = {}) => {
   ) {
     expired = true;
   }
+  // coupon does not started yet
   if (
     coupon.couponStatus == "Valid" &&
     moment().isBefore(moment(new Date(coupon.fromDate)).tz("Africa/Cairo"))

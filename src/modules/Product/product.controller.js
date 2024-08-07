@@ -268,7 +268,12 @@ export const deleteProduct = async (req, res, next) => {
 // };
 
 export const getAllProducts = async (req, res, next) => {
-  const apiFeaturesInistant = new ApiFeature(productModel.find(), req.query)
+  const apiFeaturesInistant = new ApiFeature(
+    productModel.find().populate({
+      path: "Reviews",
+    }),
+    req.query
+  )
     .paginated()
     .sort()
     .select()
